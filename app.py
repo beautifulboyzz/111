@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 # ================= 1. 系统配置 =================
-st.set_page_config(page_title="多空轮动系统 (任意周频版)", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="多空轮动系统", layout="wide", page_icon="🚀")
 
 # 获取当前脚本所在目录（兼容 GitHub/Streamlit Cloud 部署）
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
