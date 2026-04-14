@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 # ================= 1. 系统配置 =================
-st.set_page_config(page_title="多空轮动系统", layout="wide", page_icon="🚀")
+# ================= 1. 系统配置 =================
+st.set_page_config(page_title="多空轮动系统 (任意周频版)", layout="wide", page_icon="🚀")
 
 # 获取当前脚本所在目录（兼容 GitHub/Streamlit Cloud 部署）
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -14,19 +15,23 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # --- 字体适配 ---
 # 将字体文件也放在项目根目录下
 FONT_FILE = os.path.join(BASE_DIR, "SimHei.ttf")
-
 if os.path.exists(FONT_FILE):
-    # 核心修复：直接将本地字体文件注册到全局字体库
-    fm.fontManager.addfont(FONT_FILE)
-    prop = fm.FontProperties(fname=FONT_FILE)
-    # 将默认无衬线字体设置为我们加载的字体
-    plt.rcParams['font.sans-serif'] = [prop.get_name()] 
+    my_font = fm.FontProperties(fname=FONT_FILE)
+    plt.rcParams['font.sans-serif'] = ['SimHei']
     plt.rcParams['axes.unicode_minus'] = False
-    my_font = prop
 else:
-    # 如果没找到文件，在页面上强制提示
-    st.sidebar.error("⚠️ 严重警告：在当前文件夹未找到 SimHei.ttf 文件！图表中文将显示为方块。")
-    my_font = fm.FontProperties(family='sans-serif')
+    my_font = fm.FontProperties(family='SimHei')
+    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
+
+# --- 字体适配 ---
+FONT_FILE = "SimHei.ttf"
+if os.path.exists(FONT_FILE):
+    my_font = fm.FontProperties(fname=FONT_FILE)
+    plt.rcParams['font.sans-serif'] = ['SimHei']
+    plt.rcParams['axes.unicode_minus'] = False
+else:
+    my_font = fm.FontProperties(family='SimHei')
+    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 
 # --- 板块成分股映射 ---
 SECTOR_CONSTITUENTS = {
@@ -338,12 +343,18 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
 with st.sidebar:
     st.header("双轨制：指数信号 -> 单品种执行")
 
-    # 设定默认的数据相对路径 (指向 GitHub 仓库中的 data/index_data 和 data/asset_data 文件夹)
+    # 设定默认的数据相对路径 (指向 GitHub 仓库中的 data 文件夹)
     default_index_dir = os.path.join(BASE_DIR, "data", "index_data")
     default_asset_dir = os.path.join(BASE_DIR, "data", "asset_data")
 
     index_folder = st.text_input("1. 指数数据目录 (相对路径)", value=default_index_dir)
     asset_folder = st.text_input("2. 单品种数据目录 (相对路径)", value=default_asset_dir)
+    bench_name_input = st.text_input("基准识别名", value="文华商品")
+
+with st.sidebar:
+    st.header("双轨制：指数信号 -> 单品种执行")
+    index_folder = st.text_input("1. 指数数据目录", value=r"D:\SAR日频\日线")
+    asset_folder = st.text_input("2. 单品种数据目录", value=r"D:\SAR日频\全部品种日线")
     bench_name_input = st.text_input("基准识别名", value="文华商品")
 
     col1, col2 = st.columns(2)
@@ -355,7 +366,7 @@ with st.sidebar:
     win_long = c1.number_input("EWMA长期", 10, 100, 40)
     win_short = c2.number_input("EWMA短期", 2, 50, 10)
 
-    # --- 调仓日选择控件 ---
+    # --- 新增的调仓日选择控件 ---
     day_options = {"周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4}
     rebalance_day_name = st.selectbox("🎯 指定调仓日", list(day_options.keys()), index=4)  # 默认周五
     rebalance_weekday = day_options[rebalance_day_name]
