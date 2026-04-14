@@ -14,13 +14,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # --- 字体适配 ---
 # 将字体文件也放在项目根目录下
 FONT_FILE = os.path.join(BASE_DIR, "SimHei.ttf")
+
 if os.path.exists(FONT_FILE):
-    my_font = fm.FontProperties(fname=FONT_FILE)
-    plt.rcParams['font.sans-serif'] = ['SimHei']
+    # 核心修复：直接将本地字体文件注册到全局字体库
+    fm.fontManager.addfont(FONT_FILE)
+    prop = fm.FontProperties(fname=FONT_FILE)
+    # 将默认无衬线字体设置为我们加载的字体
+    plt.rcParams['font.sans-serif'] = [prop.get_name()] 
     plt.rcParams['axes.unicode_minus'] = False
+    my_font = prop
 else:
-    my_font = fm.FontProperties(family='SimHei')
-    plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
+    # 如果没找到文件，在页面上强制提示
+    st.sidebar.error("⚠️ 严重警告：在当前文件夹未找到 SimHei.ttf 文件！图表中文将显示为方块。")
+    my_font = fm.FontProperties(family='sans-serif')
 
 # --- 板块成分股映射 ---
 SECTOR_CONSTITUENTS = {
