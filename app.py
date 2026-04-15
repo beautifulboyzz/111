@@ -11,7 +11,7 @@ st.set_page_config(page_title="多空轮动系统", layout="wide", page_icon="�
 # 获取当前脚本所在目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- A. 字体适配 ---
+# --- 字体适配 ---
 FONT_FILE = os.path.join(BASE_DIR, "SimHei.ttf")
 if os.path.exists(FONT_FILE):
     my_font = fm.FontProperties(fname=FONT_FILE)
@@ -21,26 +21,26 @@ else:
     my_font = fm.FontProperties(family='SimHei')
     plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
 
-# --- B. 路径适配 (新增离线相对路径支持) ---
-idx_local_abs = r"D:\SAR日频\日线"
-idx_relative = os.path.join(BASE_DIR, "data", "日线")
+# --- 路径适配 (离线/相对路径读取) ---
+local_index_path = r"D:\SAR日频\日线"
+relative_index_path = os.path.join(BASE_DIR, "data", "日线")
 
-if os.path.exists(idx_local_abs):
-    DEFAULT_IDX_FOLDER = idx_local_abs
-elif os.path.exists(idx_relative):
-    DEFAULT_IDX_FOLDER = idx_relative
+if os.path.exists(local_index_path):
+    DEFAULT_INDEX_FOLDER = local_index_path
+elif os.path.exists(relative_index_path):
+    DEFAULT_INDEX_FOLDER = relative_index_path
 else:
-    DEFAULT_IDX_FOLDER = "data/日线"  # 兜底默认值
+    DEFAULT_INDEX_FOLDER = "."
 
-ast_local_abs = r"D:\SAR日频\全部品种日线"
-ast_relative = os.path.join(BASE_DIR, "data", "全部品种日线")
+local_asset_path = r"D:\SAR日频\全部品种日线"
+relative_asset_path = os.path.join(BASE_DIR, "data", "全部品种日线")
 
-if os.path.exists(ast_local_abs):
-    DEFAULT_AST_FOLDER = ast_local_abs
-elif os.path.exists(ast_relative):
-    DEFAULT_AST_FOLDER = ast_relative
+if os.path.exists(local_asset_path):
+    DEFAULT_ASSET_FOLDER = local_asset_path
+elif os.path.exists(relative_asset_path):
+    DEFAULT_ASSET_FOLDER = relative_asset_path
 else:
-    DEFAULT_AST_FOLDER = "data/全部品种日线" # 兜底默认值
+    DEFAULT_ASSET_FOLDER = "."
 
 
 # --- 板块成分股映射 ---
@@ -79,13 +79,15 @@ CONTRACT_MULTIPLIERS = {
     'p': 10, 'oi': 10, 'rm': 10, 'cf': 5, 'sr': 10, 'jd': 10, 'lh': 16
 }
 
+
 def get_multiplier(asset_name):
     import re
     match = re.match(r"([a-zA-Z]+)", asset_name)
     if match:
         code = match.group(1).lower()
         return CONTRACT_MULTIPLIERS.get(code, 1)
-    clean_name = asset_name.replace("主连", "").replace("指数", "").replace("连续", "").replace("日线", "").replace(".csv", "").strip()
+    clean_name = asset_name.replace("主连", "").replace("指数", "").replace("连续", "").replace("日线", "").replace(
+        ".csv", "").strip()
     code = CN_NAME_MAP.get(clean_name)
     if code:
         return CONTRACT_MULTIPLIERS.get(code, 1)
@@ -114,10 +116,11 @@ def read_robust_csv(f):
             continue
     return None
 
+
 @st.cache_data(ttl=3600)
 def load_directory_data(folder, is_index=False):
     if not os.path.exists(folder):
-        return None, None, None, None, None, f"路径不存在: {folder} (请确保离线data文件夹已配置正确)"
+        return None, None, None, None, None, f"路径不存在: {folder}"
     files = sorted([f for f in os.listdir(folder) if f.endswith('.csv')])
     if not files:
         return None, None, None, None, None, f"[{folder}] 中无CSV文件"
@@ -143,14 +146,15 @@ def load_directory_data(folder, is_index=False):
 
             price_dict[name] = df['close']
             low_dict[name] = df['low'] if 'low' in df.columns else df['close']
-            open_dict[name] = df['open'] if 'open' in df.columns else df['close'] 
+            # 【保留修复】开盘价不再使用前向填充(ffill)，停牌日保留NaN以防止偷旧价格交易
+            open_dict[name] = df['open'] if 'open' in df.columns else df['close']
             high_dict[name] = df['high'] if 'high' in df.columns else df['close']
             amount_dict[name] = df['amount']
         except:
             continue
 
     return (pd.DataFrame(price_dict).ffill(), pd.DataFrame(low_dict).ffill(),
-            pd.DataFrame(open_dict), 
+            pd.DataFrame(open_dict),  # 移除 .ffill() 防偷价
             pd.DataFrame(high_dict).ffill(), pd.DataFrame(amount_dict).ffill(), None)
 
 
@@ -170,12 +174,14 @@ class FactorEngine:
         factor_vol = factor.rolling(20).std().replace(0, np.nan)
         return factor / factor_vol
 
+
 def get_target_constituents(sector_name, available_assets):
     std_name = SECTOR_NAME_MAP.get(sector_name, sector_name)
     for key, const_list in SECTOR_CONSTITUENTS.items():
         if key == std_name:
             return [c for c in const_list if c in available_assets]
     return []
+
 
 def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, params):
     start_date = pd.to_datetime(params['start_date'])
@@ -184,7 +190,8 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
     target_weekday = params.get('rebalance_weekday', 4)
     bench_keywords = ['文华', '综合', 'NH0100', params.get('bench_name', '')]
 
-    idx_factors = FactorEngine.calculate_netpower_factor(idx_p, idx_h, idx_l, idx_amt, params['win_long'], params['win_short'])
+    idx_factors = FactorEngine.calculate_netpower_factor(idx_p, idx_h, idx_l, idx_amt, params['win_long'],
+                                                         params['win_short'])
     valid_sectors = [c for c in idx_factors.columns if not any(k in c for k in bench_keywords if k)]
 
     dates = ast_p.index.intersection(idx_p.index)
@@ -213,11 +220,11 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
 
         # --- 周频调仓日判定逻辑 ---
         is_rebalance_day = False
-        
+
         if curr_date.isocalendar().week != current_week:
             current_week = curr_date.isocalendar().week
             week_rebalanced = False
-            
+
         if not week_rebalanced:
             if curr_date.dayofweek >= target_weekday:
                 is_rebalance_day = True
@@ -234,17 +241,21 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
 
         if is_rebalance_day and not today_factors.empty:
             target_sector = today_factors.idxmin()
-            
+
             if target_sector != current_sector or i == start_idx:
                 # --- 卖出逻辑 ---
                 assets_to_sell = list(positions.keys())
                 current_round_pnls = []
 
                 for asset in assets_to_sell:
-                    sell_price = ast_o.loc[curr_date, asset] if pd.notna(ast_o.loc[curr_date, asset]) else ast_p.loc[prev_date, asset]
+                    # 如果当天开盘价为NaN（停牌），强制使用昨日收盘价作为估值平仓
+                    sell_price = ast_o.loc[curr_date, asset] if pd.notna(ast_o.loc[curr_date, asset]) else ast_p.loc[
+                        prev_date, asset]
                     entry_price = positions[asset]['entry_price']
-                    
-                    trade_pnl = (sell_price * (1 - comm_rate/2) - entry_price * (1 + comm_rate/2)) / (entry_price * (1 + comm_rate/2))
+
+                    # 【保留修复】日志中的盈亏率必须扣除手续费才能和净值对上
+                    trade_pnl = (sell_price * (1 - comm_rate / 2) - entry_price * (1 + comm_rate / 2)) / (
+                                entry_price * (1 + comm_rate / 2))
                     current_round_pnls.append(trade_pnl)
 
                     if asset in asset_trade_pnls:
@@ -264,18 +275,21 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
                         std_sector = SECTOR_NAME_MAP.get(current_sector, current_sector)
                         if std_sector in sector_trade_pnls:
                             sector_trade_pnls[std_sector].append(avg_pnl)
-                    logs.append(f"{' ' * 12} >>> 【波段小结】 板块: {current_sector:<6} | 平均净盈亏: {avg_pnl * 100:>+6.2f}%")
+                    logs.append(
+                        f"{' ' * 12} >>> 【波段小结】 板块: {current_sector:<6} | 平均净盈亏: {avg_pnl * 100:>+6.2f}%")
                     logs.append("-" * 85)
 
                 # --- 买入逻辑 ---
                 if cash > 0:
                     constituents = get_target_constituents(target_sector, ast_p.columns)
+                    # 只买入今天有正常开盘价（未停牌）的品种
                     valid_constituents = [c for c in constituents if pd.notna(ast_o.loc[curr_date, c])]
                     if valid_constituents:
                         cash_per_asset = cash / len(valid_constituents)
                         for asset in valid_constituents:
                             buy_price = ast_o.loc[curr_date, asset]
-                            positions[asset] = {'value': cash_per_asset * (1 - comm_rate / 2), 'entry_price': buy_price, 'sector': target_sector}
+                            positions[asset] = {'value': cash_per_asset * (1 - comm_rate / 2), 'entry_price': buy_price,
+                                                'sector': target_sector}
                             log_line = f"{str(curr_date.date()):<12} | {'开仓':<4} | {asset:<10} | {buy_price:<13.2f} | {'-':<13} | {'-':<8} | {target_sector:<10}"
                             logs.append(log_line)
                         cash = 0.0
@@ -295,7 +309,8 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
                 positions[asset]['value'] *= (today_close / base_price)
 
         total_nav = cash + sum(pos['value'] for pos in positions.values())
-        nav_record.append({'date': curr_date, 'nav': total_nav, 'sector': current_sector if current_sector else "空仓(现金)"})
+        nav_record.append(
+            {'date': curr_date, 'nav': total_nav, 'sector': current_sector if current_sector else "空仓(现金)"})
 
     nav_df = pd.DataFrame(nav_record).set_index('date')
 
@@ -314,25 +329,26 @@ def run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, param
 # ================= 4. UI 主程序 =================
 with st.sidebar:
     st.header("双轨制调仓配置")
-    # 这里将读取上面的动态适配路径 DEFAULT_IDX_FOLDER 和 DEFAULT_AST_FOLDER
-    index_folder = st.text_input("1. 指数数据目录", value=DEFAULT_IDX_FOLDER)
-    asset_folder = st.text_input("2. 单品种数据目录", value=DEFAULT_AST_FOLDER)
+    # 使用修改后的动态默认路径，支持相对路径回退
+    index_folder = st.text_input("1. 指数数据目录", value=DEFAULT_INDEX_FOLDER)
+    asset_folder = st.text_input("2. 单品种数据目录", value=DEFAULT_ASSET_FOLDER)
     bench_name_input = st.text_input("基准识别名", value="文华商品")
 
     col1, col2 = st.columns(2)
-    start_d = col1.date_input("开始日期", value=pd.to_datetime("2024-04-01"))
-    end_d = col2.date_input("结束日期", value=pd.to_datetime("2026-03-31"))
+    start_d = col1.date_input("开始日期", value=pd.to_datetime("2025-01-01"))
+    end_d = col2.date_input("结束日期", value=pd.to_datetime("2026-12-31"))
 
     st.subheader("🛠️ 交易参数")
     c1, c2 = st.columns(2)
     win_long = c1.number_input("EWMA长期", 10, 100, 40)
     win_short = c2.number_input("EWMA短期", 2, 50, 10)
 
+    # 【还原】仅保留周一到周五的周频选项
     freq_options = {"周五": 4, "周四": 3, "周三": 2, "周二": 1, "周一": 0}
     rebalance_freq_name = st.selectbox("🎯 指定调仓日", list(freq_options.keys()), index=0)
     rebalance_weekday = freq_options[rebalance_freq_name]
 
-    comm_bp = st.number_input("双边换手(bp)", 0.0, 50.0, 10.0)
+    comm_bp = st.number_input("双边换手(bp)", 0.0, 50.0, 0.0)  # 默认为10bp (千分之一)
     run_btn = st.button("🚀 运行双轨轮动", type="primary", use_container_width=True)
 
 st.title("多空力量边际变化 - 板块轮动策略")
@@ -354,22 +370,27 @@ if run_btn:
         }
 
         with st.spinner("回测撮合中..."):
-            res_nav, res_logs, res_sector_stats, res_asset_stats = run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l, idx_amt, ast_p, ast_o, params)
+            res_nav, res_logs, res_sector_stats, res_asset_stats = run_hybrid_strategy(idx_p, idx_o, idx_h, idx_l,
+                                                                                       idx_amt, ast_p, ast_o, params)
 
         if res_nav.empty:
             st.warning("区间内未产生交易结果，请检查数据日期范围")
         else:
+            # --- 核心指标计算 ---
             tot_ret = res_nav['nav'].iloc[-1] - 1
             days = (res_nav.index[-1] - res_nav.index[0]).days
             ann_ret = (1 + tot_ret) ** (365 / days) - 1 if days > 0 else 0
             peak = res_nav['nav'].cummax()
             max_dd = ((res_nav['nav'] - peak) / peak).min()
             daily_returns = res_nav['nav'].pct_change().dropna()
-            sharpe_ratio = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252) if not daily_returns.empty and daily_returns.std() != 0 else 0
+            sharpe_ratio = (daily_returns.mean() / daily_returns.std()) * np.sqrt(
+                252) if not daily_returns.empty and daily_returns.std() != 0 else 0
 
+            # 匹配重采样频率（Pandas Resample映射）
             freq_map = {0: 'W-MON', 1: 'W-TUE', 2: 'W-WED', 3: 'W-THU', 4: 'W-FRI'}
             resample_val = freq_map.get(rebalance_weekday, 'W-FRI')
-            
+
+            # 周度胜率计算
             period_nav = res_nav['nav'].resample(resample_val).last()
             win_rate = (period_nav.pct_change().dropna() > 0).mean() * 100
 
@@ -396,29 +417,36 @@ if run_btn:
                 fig, ax1 = plt.subplots(figsize=(12, 4.5))
                 ax1.plot(res_nav.index, res_nav['nav'], color='#d62728', lw=2, label='多空轮动策略')
                 if bench_nav_series is not None:
-                    ax1.plot(bench_nav_series.index, bench_nav_series, color='#1f77b4', lw=1.5, alpha=0.8, label=f'基准 ({actual_bench_name})')
+                    ax1.plot(bench_nav_series.index, bench_nav_series, color='#1f77b4', lw=1.5, alpha=0.8,
+                             label=f'基准 ({actual_bench_name})')
                 ax1.legend(prop=my_font)
                 ax1.grid(True, alpha=0.3)
                 st.pyplot(fig)
 
             with t2:
+                # 【收益计算】强制首日基准为 1.0，防止首周收益蒸发
                 period_nav = res_nav['nav'].resample(resample_val).last()
                 period_nav_padded = pd.concat([pd.Series({res_nav.index[0] - pd.Timedelta(days=1): 1.0}), period_nav])
                 strat_ret_pct = period_nav_padded.pct_change().dropna() * 100
                 period_cumulative = ((period_nav / 1.0 - 1) * 100)
 
+                # 【保留修复：持仓修正】使用 .first() 获取期初主导持仓板块
                 period_sector = res_nav['sector'].resample(resample_val).first()
 
+                # 【计算基准收益与超额收益】
                 if bench_nav_series is not None:
                     period_bench = bench_nav_series.resample(resample_val).last()
-                    period_bench_padded = pd.concat([pd.Series({res_nav.index[0] - pd.Timedelta(days=1): 1.0}), period_bench])
+                    period_bench_padded = pd.concat(
+                        [pd.Series({res_nav.index[0] - pd.Timedelta(days=1): 1.0}), period_bench])
                     bench_ret_pct = period_bench_padded.pct_change().dropna() * 100
                     bench_ret_pct = bench_ret_pct.reindex(strat_ret_pct.index).fillna(0)
                 else:
                     bench_ret_pct = pd.Series(0.0, index=strat_ret_pct.index)
 
+                # 超额收益 = 策略收益 - 基准收益
                 excess_ret_pct = strat_ret_pct - bench_ret_pct
 
+                # 整合为 DataFrame
                 period_df = pd.DataFrame({
                     '统计截止日期': strat_ret_pct.index.strftime('%Y-%m-%d'),
                     '当期主导持仓': period_sector.loc[strat_ret_pct.index].values,
@@ -430,18 +458,19 @@ if run_btn:
 
                 st.dataframe(
                     period_df.style.format({
-                        '策略收益(%)': '{:.2f}', 
-                        '基准收益(%)': '{:.2f}', 
-                        '超额收益(%)': '{:.2f}', 
+                        '策略收益(%)': '{:.2f}',
+                        '基准收益(%)': '{:.2f}',
+                        '超额收益(%)': '{:.2f}',
                         '累计总收益(%)': '{:.2f}'
-                    }), 
+                    }),
                     use_container_width=True
                 )
 
             with t3:
                 st.markdown("### 📝 品种调仓明细 (已扣除手续费)")
                 full_log_text = "\n".join(res_logs)
-                st.download_button("📥 点击下载调仓日志 (.txt)", data=full_log_text, file_name=f"trade_log.txt", mime="text/plain")
+                st.download_button("📥 点击下载调仓日志 (.txt)", data=full_log_text, file_name=f"trade_log.txt",
+                                   mime="text/plain")
                 st.code(full_log_text, language='text')
 
             with t4:
@@ -449,7 +478,8 @@ if run_btn:
                 sector_vals = [res_sector_stats.get(s, 0.0) for s in all_sectors]
                 sector_series = pd.Series(sector_vals, index=all_sectors).sort_values(ascending=False)
                 fig_sec, ax_sec = plt.subplots(figsize=(10, 4.5))
-                ax_sec.bar(sector_series.index, sector_series.values, color=['#d62728' if x > 0 else '#2ca02c' for x in sector_series.values])
+                ax_sec.bar(sector_series.index, sector_series.values,
+                           color=['#d62728' if x > 0 else '#2ca02c' for x in sector_series.values])
                 for i, v in enumerate(sector_series.values):
                     ax_sec.text(i, v + (1 if v >= 0 else -2), f'{v:.1f}%', ha='center', fontproperties=my_font)
                 ax_sec.set_title("各板块真实盈亏贡献 (复利累计)", fontproperties=my_font)
